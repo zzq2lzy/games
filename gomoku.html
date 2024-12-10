@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>五子棋</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 2em;
+        }
+
+        .game-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        #status {
+            font-size: 1.2em;
+            color: #34495e;
+            padding: 10px;
+            border-radius: 5px;
+            background: #f8f9fa;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            font-size: 1em;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+        }
+
+        #restart {
+            background: #3498db;
+        }
+
+        #undo {
+            background: #e74c3c;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        #board {
+            background: #deb887;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>五子棋</h1>
+        <div class="game-info">
+            <div id="status">当前玩家: 黑子</div>
+            <div class="buttons">
+                <button id="undo">悔棋</button>
+                <button id="restart">重新开始</button>
+            </div>
+        </div>
+        <div id="board">
+            <canvas id="chess" width="450" height="450"></canvas>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('chess');
+        const ctx = canvas.getContext('2d');
+        const boardSize = 15;
+        const cellSize = 30;
+        const pieceRadius = 13;
+        let currentPlayer = 1; // 1: 黑子, 2: 白子
+        let gameBoard = Array(boardSize).fill().map(() => Array(boardSize).fill(0));
+        let gameOver = false;
+        let moveHistory = [];
+
+        // 音效生成器
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+        function createMoveSound() {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.1);
+        }
+
+        function createWinSound() {
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(600, audioContext.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(1000, audioContext.currentTime + 0.3);
+            gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + 0.3);
+        }
+
+        // 背景音乐生成器
+        function createBackgroundMusic() {
+            const notes = [
+                523.25, // C
+                587.33, // D
+                659.25, // E
+                783.99, // G
+                880.00  // A
+            ];
+            
+            function playNote(frequency, startTime, duration) {
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(frequency, startTime);
+                
+                gainNode.gain.setValueAtTime(0, startTime);
+                gainNode.gain.linearRampToValueAtTime(0.1, startTime + 0.1);
+                gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
+                
+                oscillator.start(startTime);
+                oscillator.stop(startTime + duration);
+            }
+            
+            function playMelody() {
+                const now = audioContext.currentTime;
+                let time = now;
+                
+                // 简单的古筝旋律
+                const melody = [0, 1, 2, 4, 2, 1, 0, 2, 4, 2, 1, 0];
+                const durations = [1.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 1.5, 0.5, 1, 2];
+                
+                melody.forEach((noteIndex, i) => {
+                    playNote(notes[noteIndex], time, durations[i]);
+                    time += durations[i];
+                });
+                
+                // 循环播放
+                setTimeout(() => playMelody(), time * 1000);
+            }
+            
+            // 添加背景音乐控制按钮
+            const musicBtn = document.createElement('button');
+            musicBtn.textContent = '背景音乐 开/关';
+            musicBtn.style.background = '#9b59b6';
+            musicBtn.style.marginLeft = '10px';
+            document.querySelector('.buttons').appendChild(musicBtn);
+            
+            let isMusicPlaying = false;
+            
+            musicBtn.addEventListener('click', () => {
+                if (!isMusicPlaying) {
+                    playMelody();
+                    isMusicPlaying = true;
+                    musicBtn.style.background = '#8e44ad';
+                } else {
+                    audioContext.close().then(() => {
+                        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        isMusicPlaying = false;
+                        musicBtn.style.background = '#9b59b6';
+                    });
+                }
+            });
+        }
+
+        // 绘制棋盘
+        function drawBoard() {
+            ctx.fillStyle = '#DEB887';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.beginPath();
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+
+            // 绘制横线和竖线
+            for (let i = 0; i < boardSize; i++) {
+                ctx.moveTo(cellSize / 2, i * cellSize + cellSize / 2);
+                ctx.lineTo(canvas.width - cellSize / 2, i * cellSize + cellSize / 2);
+                ctx.moveTo(i * cellSize + cellSize / 2, cellSize / 2);
+                ctx.lineTo(i * cellSize + cellSize / 2, canvas.height - cellSize / 2);
+            }
+            ctx.stroke();
+
+            // 绘制棋盘中心和四个星位的小圆点
+            const dots = [[3, 3], [11, 3], [3, 11], [11, 11], [7, 7]];
+            dots.forEach(([x, y]) => {
+                ctx.beginPath();
+                ctx.arc((x + 0.5) * cellSize, (y + 0.5) * cellSize, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#000';
+                ctx.fill();
+            });
+        }
+
+        // 绘制棋子
+        function drawPiece(row, col, player) {
+            const gradient = ctx.createRadialGradient(
+                (col + 0.5) * cellSize, (row + 0.5) * cellSize, pieceRadius / 2,
+                (col + 0.5) * cellSize, (row + 0.5) * cellSize, pieceRadius
+            );
+
+            if (player === 1) {
+                gradient.addColorStop(0, '#666');
+                gradient.addColorStop(1, '#000');
+            } else {
+                gradient.addColorStop(0, '#fff');
+                gradient.addColorStop(1, '#ccc');
+            }
+
+            ctx.beginPath();
+            ctx.arc((col + 0.5) * cellSize, (row + 0.5) * cellSize, pieceRadius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+            ctx.strokeStyle = player === 1 ? '#000' : '#ccc';
+            ctx.stroke();
+        }
+
+        // 检查胜利
+        function checkWin(row, col) {
+            const directions = [
+                [[0, 1], [0, -1]], // 水平
+                [[1, 0], [-1, 0]], // 垂直
+                [[1, 1], [-1, -1]], // 对角线
+                [[1, -1], [-1, 1]] // 反对角线
+            ];
+
+            for (const direction of directions) {
+                let count = 1;
+                for (const [dx, dy] of direction) {
+                    let r = row + dx;
+                    let c = col + dy;
+                    while (
+                        r >= 0 && r < boardSize &&
+                        c >= 0 && c < boardSize &&
+                        gameBoard[r][c] === currentPlayer
+                    ) {
+                        count++;
+                        r += dx;
+                        c += dy;
+                    }
+                }
+                if (count >= 5) return true;
+            }
+            return false;
+        }
+
+        // 处理点击事件
+        canvas.addEventListener('click', (e) => {
+            if (gameOver) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const col = Math.floor(x / cellSize);
+            const row = Math.floor(y / cellSize);
+
+            if (row >= 0 && row < boardSize && col >= 0 && col < boardSize && gameBoard[row][col] === 0) {
+                gameBoard[row][col] = currentPlayer;
+                moveHistory.push([row, col, currentPlayer]);
+                drawPiece(row, col, currentPlayer);
+                createMoveSound();
+
+                if (checkWin(row, col)) {
+                    createWinSound();
+                    document.getElementById('status').textContent = 
+                        `游戏结束！${currentPlayer === 1 ? '黑子' : '白子'}获胜！`;
+                    gameOver = true;
+                } else {
+                    currentPlayer = currentPlayer === 1 ? 2 : 1;
+                    document.getElementById('status').textContent = 
+                        `当前玩家: ${currentPlayer === 1 ? '黑子' : '白子'}`;
+                }
+            }
+        });
+
+        // 悔棋功能
+        document.getElementById('undo').addEventListener('click', () => {
+            if (moveHistory.length > 0 && !gameOver) {
+                const [row, col] = moveHistory.pop();
+                gameBoard[row][col] = 0;
+                currentPlayer = currentPlayer === 1 ? 2 : 1;
+                document.getElementById('status').textContent = 
+                    `当前玩家: ${currentPlayer === 1 ? '黑子' : '白子'}`;
+                
+                // 重绘整个棋盘
+                drawBoard();
+                moveHistory.forEach(([r, c, p]) => drawPiece(r, c, p));
+            }
+        });
+
+        // 重新开始游戏
+        document.getElementById('restart').addEventListener('click', () => {
+            gameBoard = Array(boardSize).fill().map(() => Array(boardSize).fill(0));
+            currentPlayer = 1;
+            gameOver = false;
+            moveHistory = [];
+            document.getElementById('status').textContent = '当前玩家: 黑子';
+            drawBoard();
+        });
+
+        // 初始化游戏
+        createBackgroundMusic();
+        drawBoard();
+
+        // 添加鼠标悬停效果
+        canvas.addEventListener('mousemove', (e) => {
+            if (gameOver) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            const col = Math.floor(x / cellSize);
+            const row = Math.floor(y / cellSize);
+
+            drawBoard();
+            moveHistory.forEach(([r, c, p]) => drawPiece(r, c, p));
+
+            if (row >= 0 && row < boardSize && col >= 0 && col < boardSize && gameBoard[row][col] === 0) {
+                ctx.beginPath();
+                ctx.arc((col + 0.5) * cellSize, (row + 0.5) * cellSize, pieceRadius, 0, Math.PI * 2);
+                ctx.fillStyle = currentPlayer === 1 ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)';
+                ctx.fill();
+            }
+        });
+    </script>
+</body>
+</html> 
